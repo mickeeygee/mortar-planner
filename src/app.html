@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1c2025">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Mortar Planner</title>
+<style>/*{{LEAFLET_CSS}}*/</style>
+<style>
+:root { --bg:#fff; --fg:#1b1f23; --mut:#5d6670; --line:#d5d9de; --acc:#0b5fff; --bad:#c0392b; --ok:#1e8449; }
+@media (prefers-color-scheme: dark) { :root { --bg:#1c2025; --fg:#e8eaed; --mut:#9aa3ad; --line:#3a4048; --acc:#6aa0ff; --bad:#ff7b6b; --ok:#5fd08a; } }
+* { box-sizing: border-box; }
+html, body { margin:0; height:100%; -webkit-text-size-adjust:100%; touch-action:manipulation; overscroll-behavior:none; background:var(--bg); color:var(--fg); font:14px/1.4 -apple-system, system-ui, sans-serif; }
+#app { display:grid; grid-template-columns:340px 1fr; height:100vh; height:100dvh; }
+#panel { overflow-y:auto; padding:12px 14px 24px; border-right:1px solid var(--line); }
+#map { height:100%; position:relative; }
+#hud { position:absolute; left:58px; right:64px; top:8px; z-index:1000; pointer-events:none; display:flex; flex-wrap:wrap; gap:6px; }
+#hud span { background:rgba(20,24,28,.85); color:#fff; border-radius:14px; padding:3px 10px; font-size:13px; font-weight:600; }
+#hud span.no { background:rgba(192,57,43,.92); }
+#hud span.ok { background:rgba(30,132,73,.92); }
+#hint { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); z-index:1000; background:#0b5fff; color:#fff; padding:8px 14px; border-radius:20px; font-weight:600; display:none; pointer-events:none; }
+h1 { font-size:17px; margin:0 0 2px; }
+.sub { color:var(--mut); font-size:12px; margin-bottom:10px; }
+label { display:block; font-size:12px; font-weight:600; margin:10px 0 3px; }
+input, select, button { width:100%; font:inherit; padding:7px 8px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); }
+input.bad { border-color:var(--bad); }
+button { cursor:pointer; width:auto; }
+button.on { background:var(--acc); color:#fff; border-color:var(--acc); }
+.row { display:grid; grid-template-columns:1fr auto auto; gap:6px; }
+.two { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.readout { font-size:12px; color:var(--mut); min-height:16px; margin-top:2px; }
+.readout.err { color:var(--bad); }
+#out { margin-top:14px; border-top:1px solid var(--line); padding-top:8px; }
+#out table { width:100%; border-collapse:collapse; }
+#out td { padding:3px 0; vertical-align:top; }
+#out td:first-child { color:var(--mut); width:42%; }
+.verdict { font-weight:700; margin:4px 0 6px; }
+.verdict.ok { color:var(--ok); } .verdict.no { color:var(--bad); }
+.note { font-size:11px; color:var(--mut); margin-top:14px; }
+.chk { display:flex; gap:6px; align-items:center; font-weight:400; margin-top:8px; }
+.chk input { width:auto; }
+.pin { background:none; border:none; }
+.pin span { display:block; width:26px; height:26px; margin:-13px 0 0 -13px; border-radius:50%; border:3px solid #fff; color:#fff; font:700 13px/20px sans-serif; text-align:center; box-shadow:0 0 3px #000; }
+@media (max-width: 760px), (pointer: coarse) {
+  #hud { left:64px; right:70px; }
+  input, select, button { font-size:16px; min-height:44px; padding:8px 10px; }   /* 16px stops iOS zooming on focus */
+  label { font-size:13px; margin-top:12px; }
+  .chk input { min-height:0; width:22px; height:22px; }
+  .leaflet-bar a { width:40px; height:40px; line-height:40px; }
+  .pin span { width:34px; height:34px; margin:-17px 0 0 -17px; line-height:28px; font-size:16px; }
+}
+@media (max-width: 760px) {
+  #app { grid-template-columns:1fr; grid-template-rows:52fr 48fr; }
+  #map { order:-1; }
+  #panel { border-right:none; border-top:1px solid var(--line); padding:10px 14px calc(24px + env(safe-area-inset-bottom)); -webkit-overflow-scrolling:touch; }
+  #panel h1, #panel .sub { display:none; }
+  .row { grid-template-columns:1fr auto auto; }
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="panel">
+    <h1>Mortar Planner</h1>
+    <div class="sub">Where rounds land for a given charge. Planning aid only: not a firing table, never a substitute for FDC / range control. Azimuths are true north.</div>
+
+    <label>Mortar</label>
+    <div class="two">
+      <select id="sys"></select>
+      <select id="chg"></select>
+    </div>
+
+    <label>Mortar position</label>
+    <div class="row"><input type="text" id="cM" placeholder="lat, lon  or  MGRS" autocomplete="off" spellcheck="false" autocapitalize="off" autocorrect="off"><button id="pM">Tap map</button><button id="gM">GPS</button></div>
+    <div class="readout" id="rM"></div>
+
+    <label>Target position</label>
+    <div class="row"><input type="text" id="cT" placeholder="lat, lon  or  MGRS" autocomplete="off" spellcheck="false" autocapitalize="off" autocorrect="off"><button id="pT">Tap map</button><span></span></div>
+    <div class="readout" id="rT"></div>
+
+    <label>Azimuth of fire</label>
+    <div class="row" style="grid-template-columns:1fr 90px"><input type="text" id="az" inputmode="decimal" placeholder="auto (mortar → target)"><select id="azu"><option value="deg">degrees</option><option value="mil">mils</option></select></div>
+    <div class="readout" id="rAz">Leave blank to point at the target.</div>
+
+    <label>Elevation (optional)</label>
+    <div class="row" style="grid-template-columns:1fr 90px"><input type="text" id="el" inputmode="decimal" placeholder="auto (solve for target range)"><select id="elu"><option value="mil">mils</option><option value="deg">degrees</option></select></div>
+    <div class="readout" id="rEl"></div>
+
+    <label>Dispersion (optional, from firing table)</label>
+    <div class="two"><input type="text" id="per" inputmode="decimal" placeholder="PE range, m"><input type="text" id="ped" inputmode="decimal" placeholder="PE deflection, m"></div>
+    <label>Effect radius (optional)</label>
+    <input type="text" id="rad" inputmode="decimal" placeholder="metres, your own number">
+    <div class="readout">No sourced public lethal radius is built in. Enter the figure your unit uses.</div>
+
+    <div id="out"></div>
+    <div class="note" id="note"></div>
+  </div>
+  <div id="map"><div id="hud"></div><div id="hint"></div></div>
+</div>
+
+<script>/*{{LEAFLET_JS}}*/</script>
+<script>/*{{MGRS_JS}}*/</script>
+<script>
+'use strict';
+// ---- Data: published charge zone tables (FAS DoD 101 / GlobalSecurity). Min = max elevation, max = 45 deg.
+// v = muzzle velocity m/s, min/max = range m. UNVERIFIED against the current firing tables (TFT).
+const SYS = {
+  m224: { name: '60mm M224', ch: [[65,70,400],[126,200,1300],[170,350,2100],[208,500,2800],[241,650,3500]] },
+  m252: { name: '81mm M252', ch: [[66,70,425],[149,300,1900],[208,550,3300],[259,750,4600],[305,950,5900]] },
+  m120: { name: '120mm M120', ch: [[101,200,1000],[165,500,2500],[220,850,4100],[270,1200,5800],[318,1600,7200]] }
+};
+const QE_LO = 800, QE_HI = 1500;           // mils: mortar elevation limits used here (45 deg .. ~84 deg)
+const MIL = Math.PI / 3200, R = 6371008.8;
+const rad = d => d * Math.PI / 180, deg = r => r * 180 / Math.PI, $ = id => document.getElementById(id);
+
+// ---- Geometry (spherical; fine for a few km)
+function dest(p, az, d) {
+  const a = rad(az), dr = d / R, la = rad(p.lat), lo = rad(p.lng);
+  const la2 = Math.asin(Math.sin(la) * Math.cos(dr) + Math.cos(la) * Math.sin(dr) * Math.cos(a));
+  const lo2 = lo + Math.atan2(Math.sin(a) * Math.sin(dr) * Math.cos(la), Math.cos(dr) - Math.sin(la) * Math.sin(la2));
+  return { lat: deg(la2), lng: ((deg(lo2) + 540) % 360) - 180 };
+}
+function brg(a, b) {
+  const la1 = rad(a.lat), la2 = rad(b.lat), dl = rad(b.lng - a.lng);
+  return (deg(Math.atan2(Math.sin(dl) * Math.cos(la2), Math.cos(la1) * Math.sin(la2) - Math.sin(la1) * Math.cos(la2) * Math.cos(dl))) + 360) % 360;
+}
+function dist(a, b) {
+  const la1 = rad(a.lat), la2 = rad(b.lat), dl = rad(b.lng - a.lng), dp = la2 - la1;
+  const h = Math.sin(dp / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dl / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+// ---- Ballistic model: vacuum sin(2q) shape rescaled so max elevation hits the table's minimum range.
+// range(q) = Rmax * ( r + (1-r) * (sin2q - sin2qHi) / (1 - sin2qHi) ),  r = Rmin/Rmax,  q in [800, 1500] mils.
+const s2 = m => Math.sin(2 * m * MIL), sHi = s2(QE_HI);
+function rangeAt(c, q) { const r = c[1] / c[2]; return c[2] * (r + (1 - r) * (s2(q) - sHi) / (1 - sHi)); }
+function elevFor(c, rng) {
+  const r = c[1] / c[2], f = rng / c[2];
+  const s = sHi + (f - r) / (1 - r) * (1 - sHi);
+  return (Math.PI - Math.asin(Math.max(-1, Math.min(1, s)))) / 2 / MIL;
+}
+
+// ---- State
+const st = { mortar: null, target: null, pick: null };
+let lineGrab = null, aiming = false;
+// Drag the line of fire: the azimuth follows the pointer (the range stays whatever the charge/target solve gives).
+function startAim(e) { if (!st.mortar) return; aiming = true; map.dragging.disable(); e.preventDefault(); }
+function moveAim(e) {
+  if (!aiming) return;
+  const a = brg(st.mortar, map.mouseEventToLatLng(e)), mil = $('azu').value === 'mil';
+  $('az').value = mil ? Math.round(a / 360 * 6400) : a.toFixed(1);
+  update();
+}
+function endAim() { if (aiming) { aiming = false; map.dragging.enable(); } }
+document.addEventListener('pointermove', moveAim);
+document.addEventListener('pointerup', endAim);
+document.addEventListener('pointercancel', endAim);
+const chargeIdx = () => {
+  const ch = SYS[$('sys').value].ch;
+  if ($('chg').value !== 'auto') return +$('chg').value;
+  if (!st.mortar || !st.target) return 0;
+  const rt = dist(st.mortar, st.target);
+  const i = ch.findIndex(c => rt >= c[1] && rt <= c[2]);     // lowest charge that reaches the target
+  return i >= 0 ? i : (rt > ch[ch.length - 1][2] ? ch.length - 1 : 0);
+};
+const chargeOf = () => SYS[$('sys').value].ch[chargeIdx()];
+const fmtLL = p => p.lat.toFixed(5) + ', ' + p.lng.toFixed(5);
+const grid = p => { try { return MGRS.toMGRS(p.lat, p.lng, 5) || fmtLL(p); } catch (e) { return fmtLL(p); } };
+const num = id => { const v = parseFloat($(id).value); return isFinite(v) ? v : null; };
+const m0 = x => Math.round(x).toLocaleString();
+
+// ---- Map
+const map = L.map('map', { zoomControl: true }).setView([35.1, -79.0], 12);
+const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: 'Esri World Imagery' }).addTo(map);
+const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' });
+L.control.layers({ Satellite: sat, Street: osm }, null, { position: 'topright' }).addTo(map);
+const layer = L.layerGroup().addTo(map);
+const pin = (p, txt, col, drag) => L.marker(p, { draggable: drag, icon: L.divIcon({ className: 'pin', html: `<span style="background:${col}">${txt}</span>`, iconSize: [0, 0] }) });
+
+map.on('click', e => {
+  if (!st.pick) return;
+  setPos(st.pick, { lat: e.latlng.lat, lng: e.latlng.lng });
+  setPick(null);
+});
+function setPick(w) {
+  st.pick = w; $('pM').classList.toggle('on', w === 'M'); $('pT').classList.toggle('on', w === 'T');
+  map.getContainer().style.cursor = w ? 'crosshair' : '';
+  const h = $('hint'); h.style.display = w ? 'block' : 'none'; h.textContent = w === 'M' ? 'Tap the map to place the mortar' : 'Tap the map to place the target';
+}
+$('pM').onclick = () => setPick(st.pick === 'M' ? null : 'M');
+$('pT').onclick = () => setPick(st.pick === 'T' ? null : 'T');
+$('gM').onclick = () => {
+  if (!navigator.geolocation) { $('rM').className = 'readout err'; $('rM').textContent = 'GPS not available.'; return; }
+  navigator.geolocation.getCurrentPosition(p => { setPos('M', { lat: p.coords.latitude, lng: p.coords.longitude }); map.setView(st.mortar, 14); },
+    () => { $('rM').className = 'readout err'; $('rM').textContent = 'GPS denied or unavailable (needs https).'; }, { enableHighAccuracy: true, timeout: 10000 });
+};
+
+function setPos(w, p) {
+  st[w === 'M' ? 'mortar' : 'target'] = p;
+  $('c' + w).value = grid(p); $('c' + w).classList.remove('bad');
+  update();
+}
+['M', 'T'].forEach(w => $('c' + w).addEventListener('change', () => {
+  const t = $('c' + w).value.trim(), key = w === 'M' ? 'mortar' : 'target';
+  if (!t) { st[key] = null; $('r' + w).textContent = ''; return update(); }
+  const ll = MGRS.parseCoord(t);
+  if (!ll) { $('c' + w).classList.add('bad'); $('r' + w).className = 'readout err'; $('r' + w).textContent = 'Not recognised. Use "lat, lon" or MGRS like 17S QV 12345 67890'; return; }
+  st[key] = { lat: ll.lat, lng: ll.lon !== undefined ? ll.lon : ll.lng }; $('c' + w).classList.remove('bad');
+  update(); if (st.mortar && st.target) fit();
+}));
+
+// ---- Setup
+$('sys').innerHTML = Object.keys(SYS).map(k => `<option value="${k}">${SYS[k].name}</option>`).join('');
+$('sys').value = 'm252';
+function fillCharges() {
+  const keep = $('chg').value;
+  $('chg').innerHTML = '<option value="auto">Auto charge</option>' + SYS[$('sys').value].ch.map((c, i) => `<option value="${i}">Charge ${i} · ${m0(c[1])}–${m0(c[2])} m</option>`).join('');
+  $('chg').value = keep === 'auto' || (keep && SYS[$('sys').value].ch[keep]) ? keep : 'auto';
+}
+fillCharges();
+$('sys').onchange = () => { fillCharges(); update(); };
+['chg', 'az', 'azu', 'el', 'elu', 'per', 'ped', 'rad'].forEach(id => $(id).addEventListener('input', update));
+
+function fit() {
+  const pts = [st.mortar, st.target].filter(Boolean);
+  if (pts.length === 1) map.setView(pts[0], Math.max(map.getZoom(), 14)); else if (pts.length === 2) map.fitBounds(L.latLngBounds(pts), { padding: [60, 60] });
+}
+
+// ---- Main
+function update() {
+  layer.clearLayers();
+  const out = $('out'), ci = chargeIdx(), c = chargeOf(), unitAz = $('azu').value, unitEl = $('elu').value;
+  const rows = [];
+  $('note').textContent = 'Charge limits are the published min/max for this charge (min at max elevation, max at 45°). Elevation between them is interpolated with a simple drag-free curve, so treat it as approximate. Real fire missions use the firing table and FDC.';
+  $('rAz').textContent = 'Blank = point at the target. Or drag the line on the map.'; $('rAz').className = 'readout';
+  $('rEl').textContent = ''; $('rEl').className = 'readout';
+
+  if (st.mortar) pin(st.mortar, 'M', '#1e6fff', true).on('dragend', e => setPos('M', e.target.getLatLng())).addTo(layer);
+  if (st.target) pin(st.target, 'T', '#d93025', true).on('dragend', e => setPos('T', e.target.getLatLng())).addTo(layer);
+  if (!st.mortar) { $('hud').innerHTML = ''; out.innerHTML = '<div class="readout">Set the mortar position to begin.</div>'; return; }
+
+  // azimuth
+  const dir = st.target ? brg(st.mortar, st.target) : null;
+  let az = num('az');
+  if (az !== null) { if (unitAz === 'mil') az = az / 6400 * 360; az = ((az % 360) + 360) % 360; }
+  else az = dir;
+  if (az === null) { $('hud').innerHTML = ''; out.innerHTML = '<div class="readout">Set a target or type an azimuth.</div>'; return; }
+  rows.push(['Azimuth of fire', `${az.toFixed(1)}° &nbsp;/&nbsp; ${Math.round(az / 360 * 6400)} mils`]);
+
+  const A = st.mortar, rmin = c[1], rmax = c[2];
+
+  // range / elevation to the impact
+  let rng = null, qe = null, status = '';
+  const elIn = num('el');
+  if (elIn !== null) {
+    qe = unitEl === 'deg' ? elIn / 360 * 6400 : elIn;
+    if (qe < QE_LO || qe > QE_HI) { $('rEl').className = 'readout err'; $('rEl').textContent = `Outside ${QE_LO}–${QE_HI} mils (${(QE_LO / 6400 * 360).toFixed(0)}°–${(QE_HI / 6400 * 360).toFixed(0)}°). Using the nearest limit.`; qe = Math.max(QE_LO, Math.min(QE_HI, qe)); }
+    rng = rangeAt(c, qe);
+  } else if (st.target) {
+    const rt = dist(A, st.target);
+    rng = Math.max(rmin, Math.min(rmax, rt));
+    qe = elevFor(c, rng);
+    if (rt > rmax) status = `Target is ${m0(rt - rmax)} m beyond max range for charge ${ci}. ${ci === SYS[$('sys').value].ch.length - 1 ? 'Out of range for this mortar.' : 'Use a higher charge.'}`;
+    else if (rt < rmin) status = `Target is ${m0(rmin - rt)} m inside min range for charge ${ci}. Use a lower charge.`;
+    $('rEl').textContent = 'Solved for the target range.';
+  } else { $('rEl').textContent = 'Set a target or type an elevation.'; }
+
+  if (st.target) {
+    const rt = dist(A, st.target);
+    rows.unshift(['Range to target', `${m0(rt)} m`]);
+    rows.unshift(['Direction to target', `${dir.toFixed(1)}° &nbsp;/&nbsp; ${Math.round(dir / 360 * 6400)} mils`]);
+  }
+  rows.push([$('chg').value === 'auto' ? 'Charge (auto)' : 'Charge', ci + ` &nbsp;(${m0(rmin)}–${m0(rmax)} m)`]);
+
+  let verdict = '';
+  if (rng !== null) {
+    const imp = dest(A, az, rng);
+    const im = pin(imp, '✕', '#f39c12', false).addTo(layer);
+    im.bindTooltip(`Impact: ${grid(imp)}`);
+    const rad_ = num('rad');
+    if (rad_ > 0) { L.circle(imp, { radius: rad_, color: '#ff3b30', weight: 1.5, fillOpacity: .12, interactive: false }).addTo(layer); rows.push(['Effect radius', `${m0(rad_)} m`]); }
+    L.polyline([A, imp], { color: '#fff', weight: 3, opacity: .9, interactive: false }).addTo(layer);
+    L.polyline([A, imp], { color: '#f39c12', weight: 1.5, interactive: false }).addTo(layer);
+    lineGrab = L.polyline([A, imp], { color: '#000', weight: matchMedia('(pointer: coarse)').matches ? 48 : 24, opacity: 0.01, className: 'grab' }).addTo(layer);
+    lineGrab.getElement().style.cursor = 'grab'; lineGrab.getElement().style.touchAction = 'none';
+    lineGrab.getElement().addEventListener('pointerdown', startAim);
+    rows.push(['Elevation', `${Math.round(qe)} mils &nbsp;/&nbsp; ${(qe / 6400 * 360).toFixed(1)}°`]);
+    rows.push(['Impact range', `${m0(rng)} m`]);
+    rows.push(['Impact grid', grid(imp)]);
+
+    const per = num('per'), ped = num('ped');
+    if (per !== null || ped !== null) {
+      const pr = per || 0, pd = ped || 0, k = 4, pts = [];
+      for (let t = 0; t <= 360; t += 5) {   // ellipse at k probable errors, long axis along the line of fire
+        const x = k * pr * Math.cos(rad(t)), y = k * pd * Math.sin(rad(t));
+        pts.push(dest(dest(imp, az, x), az + 90, y));
+      }
+      L.polygon(pts, { color: '#ff3b30', weight: 1.5, fillOpacity: .12, interactive: false }).addTo(layer);
+      rows.push(['Ellipse', `4 PE: ±${m0(k * pr)} m range, ±${m0(k * pd)} m deflection`]);
+    }
+    if (st.target) {
+      L.polyline([st.target, imp], { color: '#ff3b30', weight: 1.5, dashArray: '3 4', interactive: false }).addTo(layer);
+      const miss = dist(imp, st.target);
+      // split miss into range (along azimuth) and deflection (across)
+      const b = brg(st.target, imp), d = rad(b - az), along = miss * Math.cos(d), across = miss * Math.sin(d);
+      rows.push(['Impact vs. target', `${m0(miss)} m &nbsp;(${m0(Math.abs(along))} m ${along >= 0 ? 'over' : 'short'}, ${m0(Math.abs(across))} m ${across >= 0 ? 'right' : 'left'})`]);
+      if (!status) {
+        verdict = miss < 1 ? '<div class="verdict ok">On target</div>' : miss < 50 ? `<div class="verdict ok">Within ${m0(Math.max(miss, 1))} m of target</div>` : `<div class="verdict no">Impacts ${m0(miss)} m from the target</div>`;
+      }
+    }
+  }
+  if (status) verdict = `<div class="verdict no">${status}</div>`;
+  const hud = [];
+  if (rng !== null) { hud.push(`<span>Chg ${ci}</span>`, `<span>${m0(rng)} m</span>`, `<span>${Math.round(qe)} mils</span>`, `<span>Az ${Math.round(az / 360 * 6400)} mils</span>`); }
+  if (status) hud.push(`<span class="no">${status}</span>`);
+  else if (st.target && rng !== null) { const ms = dist(dest(A, az, rng), st.target); hud.push(ms < 50 ? '<span class="ok">On target</span>' : `<span class="no">Miss ${m0(ms)} m</span>`); }
+  $('hud').innerHTML = hud.join('');
+  out.innerHTML = verdict + '<table>' + rows.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('') + '</table>';
+  if (az !== null && num('az') !== null && dir !== null) {
+    const dd = Math.abs(((az - dir + 540) % 360) - 180);
+    if (dd > 0.05) { $('rAz').textContent = `${dd.toFixed(1)}° (${Math.round(dd / 360 * 6400)} mils) off the line to the target.`; }
+  }
+}
+update();
+</script>
+</body>
+</html>
