@@ -1040,8 +1040,6 @@ function update() {
     lineGrab.getElement().style.cursor = 'grab'; lineGrab.getElement().style.touchAction = 'none';
     lineGrab.getElement().addEventListener('pointerdown', startAim);
     rows.push(['Elevation', `${Math.round(qe)} mils &nbsp;/&nbsp; ${(qe / 6400 * 360).toFixed(1)}°`]);
-    const tf = tofAt($('sys').value, ci, qe);
-    if (tf !== null) rows.push(['Time of flight', `≈ ${Math.round(tf)} s`]);
     rows.push(['Impact range', `${m0(rng)} m`]);
     rows.push(['Impact grid', grid(imp)]);
 
@@ -1066,6 +1064,8 @@ function update() {
       }
     }
   }
+  const tfRow = rng !== null ? tofAt($('sys').value, ci, qe) : null;
+  if (tfRow !== null) rows.push(['Time of flight', `≈ ${Math.round(tfRow)} s`]);
   if (status) verdict = `<div class="verdict no">${status}</div>`;
   const hud = [];
   if (rng !== null) { hud.push(`<span>Chg ${ci}</span>`, `<span>${m0(rng)} m</span>`, `<span>${Math.round(qe)} mils</span>`, `<span>Az ${Math.round(az / 360 * 6400)} mils</span>`);
