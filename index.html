@@ -849,7 +849,10 @@ button.on { background:var(--acc); color:#fff; border-color:var(--acc); }
 // v = muzzle velocity m/s, min/max = range m. UNVERIFIED against the current firing tables (TFT).
 const SYS = {
   m224: { name: '60mm M224', ch: [[65,70,400],[126,200,1300],[170,350,2100],[208,500,2800],[241,650,3500]] },
-  m252: { name: '81mm M252', ch: [[66,70,425],[149,300,1900],[208,550,3300],[259,750,4600],[305,950,5900]] },
+  m252: { name: '81mm M252', ch: [[66,70,425],[149,300,1900],[208,550,3300],[259,750,4600],[305,950,5900]],
+    // Time of flight from the M252 graphical firing scale (FT 81-AR-1, C-3): [TOF at 800 mils / max range, TOF at 1500 mils / min range], seconds.
+    // Charge 1's 800-mil end and charge 0's two ends are unreadable or cramped in the photo, so those are estimates.
+    tof: [[9.7, 13.0], [20.6, 28.3], [28, 38.4], [33, 46], [38, 52]] },
   m120: { name: '120mm M120', ch: [[101,200,1000],[165,500,2500],[220,850,4100],[270,1200,5800],[318,1600,7200]] }
 };
 const QE_LO = 800, QE_HI = 1500;           // mils: mortar elevation limits used here (45 deg .. ~84 deg)
@@ -877,6 +880,12 @@ function dist(a, b) {
 // range(q) = Rmax * ( r + (1-r) * (sin2q - sin2qHi) / (1 - sin2qHi) ),  r = Rmin/Rmax,  q in [800, 1500] mils.
 const s2 = m => Math.sin(2 * m * MIL), sHi = s2(QE_HI);
 function rangeAt(c, q) { const r = c[1] / c[2]; return c[2] * (r + (1 - r) * (s2(q) - sHi) / (1 - sHi)); }
+// TOF: drag-free sin(elevation) shape with an effective velocity that is blended so both wheel endpoints are hit exactly.
+function tofAt(sys, ci, q) {
+  const t = SYS[sys].tof; if (!t) return null;
+  const g = 9.81, v8 = t[ci][0] * g / (2 * Math.sin(QE_LO * MIL)), v15 = t[ci][1] * g / (2 * Math.sin(QE_HI * MIL));
+  return 2 * (v8 + (v15 - v8) * (q - QE_LO) / (QE_HI - QE_LO)) * Math.sin(q * MIL) / g;
+}
 function elevFor(c, rng) {
   const r = c[1] / c[2], f = rng / c[2];
   const s = sHi + (f - r) / (1 - r) * (1 - sHi);
@@ -974,7 +983,7 @@ function update() {
   layer.clearLayers();
   const out = $('out'), ci = chargeIdx(), c = chargeOf(), unitAz = $('azu').value, unitEl = $('elu').value;
   const rows = [];
-  $('note').textContent = 'Charge limits are the published min/max for this charge (min at max elevation, max at 45°). Elevation between them is interpolated with a simple drag-free curve, so treat it as approximate. Real fire missions use the firing table and FDC.';
+  $('note').textContent = 'Charge limits are the published min/max for this charge (min at max elevation, max at 45°). Elevation between them is interpolated with a simple drag-free curve, so treat it as approximate. Real fire missions use the firing table and FDC.' + (SYS[$('sys').value].tof ? ' Time of flight comes from the M252 graphical firing scale and is interpolated between its two ends.' : ' No time-of-flight data for this mortar.');
   $('rAz').textContent = 'Blank = point at the target. Or drag the line on the map.'; $('rAz').className = 'readout';
   $('rEl').textContent = ''; $('rEl').className = 'readout';
 
@@ -1028,6 +1037,8 @@ function update() {
     lineGrab.getElement().style.cursor = 'grab'; lineGrab.getElement().style.touchAction = 'none';
     lineGrab.getElement().addEventListener('pointerdown', startAim);
     rows.push(['Elevation', `${Math.round(qe)} mils &nbsp;/&nbsp; ${(qe / 6400 * 360).toFixed(1)}°`]);
+    const tf = tofAt($('sys').value, ci, qe);
+    if (tf !== null) rows.push(['Time of flight', `≈ ${Math.round(tf)} s`]);
     rows.push(['Impact range', `${m0(rng)} m`]);
     rows.push(['Impact grid', grid(imp)]);
 
@@ -1054,7 +1065,8 @@ function update() {
   }
   if (status) verdict = `<div class="verdict no">${status}</div>`;
   const hud = [];
-  if (rng !== null) { hud.push(`<span>Chg ${ci}</span>`, `<span>${m0(rng)} m</span>`, `<span>${Math.round(qe)} mils</span>`, `<span>Az ${Math.round(az / 360 * 6400)} mils</span>`); }
+  if (rng !== null) { hud.push(`<span>Chg ${ci}</span>`, `<span>${m0(rng)} m</span>`, `<span>${Math.round(qe)} mils</span>`, `<span>Az ${Math.round(az / 360 * 6400)} mils</span>`);
+    const tf = tofAt($('sys').value, ci, qe); if (tf !== null) hud.push(`<span>TOF ≈${Math.round(tf)} s</span>`); }
   if (status) hud.push(`<span class="no">${status}</span>`);
   else if (st.target && rng !== null) { const ms = dist(dest(A, az, rng), st.target); hud.push(ms < 50 ? '<span class="ok">On target</span>' : `<span class="no">Miss ${m0(ms)} m</span>`); }
   $('hud').innerHTML = hud.join('');
